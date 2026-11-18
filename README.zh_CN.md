@@ -220,6 +220,25 @@ docker compose up -d
 docker compose logs -f new-api
 ```
 
+### MicroEduLab HK 实例
+
+本仓库的通用 Compose 配置与 HK 生产实例分开维护。当前实例入口为
+`https://new.microedulab.com`，服务器部署目录为 `/opt/new-api`，运行镜像为
+`calciumion/new-api:v1.0.0-rc.51`。
+
+- `new-api-gateway` 使用 `new-api_new-api-network`，并额外加入外部 Docker 网络
+  `sub2api_sub2api-network`，通过 `http://sub2api:8080` 访问 Sub2API。
+- OpenAI 兼容客户端的 Base URL 为 `https://new.microedulab.com/v1`。Caddy 也兼容
+  未带 `/v1` 的 `/responses`、`/chat/completions` 和 `/models`，并将其重写到对应的
+  `/v1/...` 路径。
+- 当前生产模型价格和长上下文表达式保存在数据库配置中。GPT 系列阈值为 `272K`，
+  `gemini-3.1-pro` 和 `grok-4.7` 阈值为 `200K`，`claude-haiku-5-5` 阈值为 `100K`。
+  生产价格保留管理员手动调整的短上下文价格。
+
+2026-11-18 的现场复核包含应用健康、公网 HTTPS、标准 `/v1` 请求和兼容路径请求。
+DeepSeek 官方分组此前出现过上游账号超时和网页响应被当作 API 响应的情况。当前兼容路径
+已返回 JSON 模型结果，详细现场证据见工作区的 [HK 生产状态记录](https://github.com/dude1wudv/AI-Platform-Projects/blob/main/docs/ops/hk-status.md)。
+
 ### 存储与配置
 
 | 组件 | 可选方案 |
