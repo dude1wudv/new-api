@@ -34,6 +34,76 @@ const expression =
 const chainedExpression =
   'len <= 32000 && c <= 200 ? tier("discount", p * 0.8 + c * 2 + cr * 0.16 + cc * 0.17) : len <= 32000 ? tier("short", p * 0.8 + c * 8 + cr * 0.16 + cc * 0.17) : len <= 128000 ? tier("mid", p * 1.2 + c * 16 + cr * 0.16 + cc * 0.17) : tier("long", p * 2.4 + c * 24 + cr * 0.16 + cc * 0.17)'
 
+test('edits long-context prices with stored multipliers in the visual editor', async () => {
+  const billingExpr =
+    'len <= 272000 ? tier("base", p * 2.5 + c * 15 + cr * 0.25 + cc12h * 6.25 + img * 0)\n' +
+    ': tier("long_context", p * 2.5 * 2 + c * 15 * 1.5 + cr * 0.25 * 2 + cc12h * 6.25 * 2 + img * 0 * 2)'
+  const onBillingExprChange = vi.fn()
+  const props = {
+    modelName: 'gpt-6-sol',
+    requestRuleExpr: '',
+    onBillingExprChange,
+    onRequestRuleExprChange: vi.fn(),
+  }
+  const view = render(
+    <TieredPricingEditor {...props} billingExpr={billingExpr} />
+  )
+  const longTier = () =>
+    within(screen.getByRole('group', { name: 'Pricing tier long_context' }))
+  const user = userEvent.setup()
+  const openLongTier = () =>
+    user.click(
+      longTier().getByRole('button', { name: 'Edit pricing rule long_context' })
+    )
+
+  expect(
+    screen.getByRole('combobox', { name: 'Editor mode' })
+  ).toHaveTextContent('Visual editor')
+  expect(screen.getByRole('textbox', { name: 'Condition value' })).toHaveValue(
+    '272000'
+  )
+  expect(longTier().getByText('$22.5', { exact: false })).toBeVisible()
+  expect(onBillingExprChange).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByRole('textbox', { name: 'Condition value' }), {
+    target: { value: '280000' },
+  })
+  const updatedThreshold = billingExpr.replace('272000', '280000')
+  expect(onBillingExprChange).toHaveBeenLastCalledWith(updatedThreshold)
+
+  await openLongTier()
+  expect(longTier().getByRole('textbox', { name: 'Input price' })).toHaveValue(
+    '5'
+  )
+  expect(longTier().getByRole('textbox', { name: 'Output price' })).toHaveValue(
+    '22.5'
+  )
+  expect(
+    longTier().getByRole('textbox', { name: 'Cache read price' })
+  ).toHaveValue('0.5')
+  expect(
+    longTier().getByRole('textbox', { name: 'Cache create (12h) price' })
+  ).toHaveValue('12.5')
+  fireEvent.change(longTier().getByRole('textbox', { name: 'Input price' }), {
+    target: { value: '5.25' },
+  })
+  const saved = updatedThreshold.replace('p * 2.5 * 2', 'p * 5.25')
+  expect(onBillingExprChange).toHaveBeenLastCalledWith(saved)
+
+  view.unmount()
+  render(<TieredPricingEditor {...props} billingExpr={saved} />)
+  expect(screen.getByRole('textbox', { name: 'Condition value' })).toHaveValue(
+    '280000'
+  )
+  await openLongTier()
+  expect(longTier().getByRole('textbox', { name: 'Input price' })).toHaveValue(
+    '5.25'
+  )
+  expect(longTier().getByRole('textbox', { name: 'Output price' })).toHaveValue(
+    '22.5'
+  )
+})
+
 test.each([
   [
     'gpt-6-sol',

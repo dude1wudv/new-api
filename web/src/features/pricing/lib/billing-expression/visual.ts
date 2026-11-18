@@ -140,6 +140,28 @@ function readVisualCondition(node: ExpressionNode): VisualCondition | null {
   }
 }
 
+function readVisualPrice(
+  node: ExpressionNode
+): { variable: VisualPrice['variable']; value: number } | null {
+  if (node.kind !== 'binary' || node.operator !== '*') return null
+  const { left, right } = node
+  if (
+    right.kind !== 'literal' ||
+    typeof right.value !== 'number' ||
+    right.value < 0
+  ) {
+    return null
+  }
+  if (left.kind === 'variable') {
+    if (left.name === 'len' || left.name === 'image_count') return null
+    return { variable: left.name, value: right.value }
+  }
+  const base = readVisualPrice(left)
+  if (!base) return null
+  const value = base.value * right.value
+  return Number.isFinite(value) ? { variable: base.variable, value } : null
+}
+
 function readVisualPricing(node: ExpressionNode): VisualPricingNode | null {
   const identity = { id: `pricing-${node.start}-${node.end}`, origin: node }
   if (node.kind === 'conditional') {
@@ -174,24 +196,14 @@ function readVisualPricing(node: ExpressionNode): VisualPricingNode | null {
       fixedPrice: String(body.args[0].value),
     }
   }
-  for (const term of flattenBinary(node.args[1], '+')) {
-    if (
-      term.kind !== 'binary' ||
-      term.operator !== '*' ||
-      term.left.kind !== 'variable' ||
-      term.left.name === 'len' ||
-      term.left.name === 'image_count' ||
-      term.right.kind !== 'literal' ||
-      typeof term.right.value !== 'number' ||
-      term.right.value < 0
-    ) {
-      return null
-    }
-    const variable = term.left.name
+  for (const term of flattenBinary(body, '+')) {
+    const price = readVisualPrice(term)
+    if (!price) return null
+    const { variable, value } = price
     if (prices.some((price) => price.variable === variable)) return null
     prices.push({
-      variable: term.left.name,
-      value: String(term.right.value),
+      variable,
+      value: String(value),
       origin: term,
     })
   }
@@ -438,19 +450,26 @@ function writeVisualPricing(
         message: 'Enter a finite, non-negative price.',
       })
     }
-    if (
-      price.origin?.kind === 'binary' &&
-      price.origin.right.kind === 'literal'
-    ) {
-      const text =
-        value === price.origin.right.value
-          ? source.slice(price.origin.right.start, price.origin.right.end)
-          : price.value
-      valuePatches.push({ node: price.origin.right, text })
-      terms.push(
-        patchSource(source, price.origin, [{ node: price.origin.right, text }])
-      )
-    } else terms.push(`${price.variable} * ${price.value}`)
+    const origin = price.origin
+    const term = `${price.variable} * ${price.value}`
+    if (!origin) {
+      terms.push(term)
+      continue
+    }
+    const original = readVisualPrice(origin)
+    if (original?.variable === price.variable && original.value === value) {
+      // Keep the original multiplication order when only other fields change.
+      terms.push(source.slice(origin.start, origin.end))
+      continue
+    }
+    const patch =
+      origin.kind === 'binary' &&
+      origin.left.kind === 'variable' &&
+      origin.left.name === price.variable
+        ? { node: origin.right, text: price.value }
+        : { node: origin, text: term }
+    valuePatches.push(patch)
+    terms.push(patchSource(source, origin, [patch]))
   }
   const origin = node.origin
   if (origin?.kind === 'call' && origin.name === 'tier') {
